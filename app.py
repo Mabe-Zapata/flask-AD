@@ -14,7 +14,7 @@ def getConnection():
     return pytds.connect(server=os.environ["DB_SERVER"],
                         database=os.environ["DB_NAME"],
                         user=os.environ['DB_USER'],
-                        password=os.environ["DB_PASSWORD"],
+                        password=os.environ["DB_PASS"],
                         port=1433,
                         cafile=certifi.where(),
                         validate_host=True)
