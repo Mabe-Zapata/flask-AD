@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from email.mime.text import MIMEText
-from smtplib import SMTP_SSL
+from smtplib import SMTP_SSL, SMTPAuthenticationError, SMTPException
 import os
 import certifi
 import pytds
@@ -39,19 +39,36 @@ def enviar_correo(proceso, detalle):
     password = os.environ.get("GMAIL_APP_PASSWORD")  # Gmail app password (16 chars)
     destino = os.environ.get("EMAIL_DESTINO")
 
+    faltantes = [
+        nombre for nombre, valor in (
+            ("EMAIL_REMITENTE", remitente),
+            ("GMAIL_APP_PASSWORD", password),
+            ("EMAIL_DESTINO", destino),
+        ) if not valor
+    ]
+    if faltantes:
+        return f"Faltan variables de entorno: {', '.join(faltantes)}"
+
     mensaje = MIMEText(detalle, "plain", "utf-8")
     mensaje["Subject"] = f"Proceso: {proceso}"
     mensaje["From"] = remitente
     mensaje["To"] = destino
 
+    # Returns None on success, or a readable error message
     try:
-        with SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+        with SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
             server.login(remitente, password)
             server.sendmail(remitente, [destino], mensaje.as_string())
-        return True
-    except Exception:
-        app.logger.exception("Error al enviar correo")
-        return False
+        return None
+    except SMTPAuthenticationError as e:
+        app.logger.exception("Error de autenticacion con Gmail")
+        return f"Gmail rechazo el usuario o la contrasena de aplicacion: {e.smtp_code} {e.smtp_error.decode(errors='ignore')}"
+    except SMTPException as e:
+        app.logger.exception("Error SMTP al enviar correo")
+        return f"Error SMTP: {e}"
+    except OSError as e:  # after SMTPException: it subclasses OSError
+        app.logger.exception("No se pudo conectar a Gmail")
+        return f"No se pudo conectar a {SMTP_SERVER}:{SMTP_PORT} (el servidor puede estar bloqueando SMTP): {e}"
 
 @app.route('/api/procesar', methods=['POST'])
 def procesar():
@@ -78,8 +95,9 @@ def procesar():
         for row in rows
     ) or "No hay productos registrados"
 
-    if not enviar_correo(proceso, detalle):
-        return jsonify({"message": "Error al enviar correo"}), 500
+    error = enviar_correo(proceso, detalle)
+    if error:
+        return jsonify({"message": "Error al enviar correo", "error": error}), 500
 
     return jsonify({"message": "Correo enviado con exito"}), 200
 
