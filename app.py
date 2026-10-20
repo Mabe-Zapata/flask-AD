@@ -17,7 +17,8 @@ def getConnection():
                         password=os.environ["DB_PASS"],
                         port=1433,
                         cafile=certifi.where(),
-                        validate_host=True)
+                        validate_host=True,
+                        row_strategy=pytds.namedtuple_row_strategy)
     
     ##esto es una mejor practica en un environment, esto lo vamos a llevar a render y el objetivo va a ser que se mejore 
     ## con la config de wordpress me voy a conectar a una api de render dode se trae la info desde el sql.
