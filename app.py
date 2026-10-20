@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from urllib import request as urlrequest
+from html import escape
 import json
 import os
 import certifi
@@ -31,7 +32,7 @@ def getConnection():
         row_strategy=pytds.namedtuple_row_strategy
     )
 
-def enviar_correo(proceso, detalle):
+def enviar_correo(proceso, detalle, detalle_html=None):
     # Sends through a Google Apps Script web app over HTTPS (Render free blocks SMTP)
     script_url = os.environ.get("APPS_SCRIPT_URL")
     token = os.environ.get("APPS_SCRIPT_TOKEN")
@@ -52,6 +53,7 @@ def enviar_correo(proceso, detalle):
         "to": destino,
         "subject": f"Proceso: {proceso}",
         "body": detalle,
+        "htmlBody": detalle_html,
     }).encode("utf-8")
     req = urlrequest.Request(
         script_url, data=payload, headers={"Content-Type": "application/json"}
@@ -95,16 +97,42 @@ def procesar():
         app.logger.exception("Error al consultar productos")
         return jsonify({"message": "Error interno al consultar productos"}), 500
 
-    detalle = "\n".join(
+    total = len(rows)
+    resumen = f"Registros procesados: {total}"
+
+    # Plain text fallback for mail clients that do not render HTML
+    detalle = resumen + "\n\n" + ("\n".join(
         f"ID: {row[0]} | Nombre: {row[1]} | Precio: {row[2]} | Stock: {row[3]}"
         for row in rows
-    ) or "No hay productos registrados"
+    ) or "No hay productos registrados")
 
-    error = enviar_correo(proceso, detalle)
+    celda = 'style="border:1px solid #ddd;padding:8px"'
+    filas_html = "".join(
+        f"<tr><td {celda}>{row[0]}</td><td {celda}>{escape(str(row[1]))}</td>"
+        f'<td {celda} align="right">{row[2]}</td><td {celda} align="right">{row[3]}</td></tr>'
+        for row in rows
+    ) or f'<tr><td {celda} colspan="4">No hay productos registrados</td></tr>'
+    detalle_html = f"""
+        <div style="font-family:Arial,sans-serif;color:#222">
+            <h2 style="margin:0 0 8px">{escape(proceso)}</h2>
+            <p style="margin:0 0 16px"><strong>{resumen}</strong></p>
+            <table style="border-collapse:collapse;font-size:14px">
+                <thead>
+                    <tr style="background:#000;color:#fff">
+                        <th {celda}>ID</th><th {celda}>Nombre</th>
+                        <th {celda}>Precio</th><th {celda}>Stock</th>
+                    </tr>
+                </thead>
+                <tbody>{filas_html}</tbody>
+            </table>
+        </div>
+    """
+
+    error = enviar_correo(proceso, detalle, detalle_html)
     if error:
         return jsonify({"message": "Error al enviar correo", "error": error}), 500
 
-    return jsonify({"message": "Correo enviado con exito"}), 200
+    return jsonify({"message": "Correo enviado con exito", "registros": total}), 200
 
 @app.route('/test-db',methods=['GET'])
 def test_db():
