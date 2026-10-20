@@ -1,12 +1,9 @@
 from flask import Flask, jsonify, request
-from email.mime.text import MIMEText
-from smtplib import SMTP_SSL, SMTPAuthenticationError, SMTPException
+from urllib import request as urlrequest
+import json
 import os
 import certifi
 import pytds
-
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 465
 
 #===============================
 # conexion con la base de datos
@@ -35,40 +32,48 @@ def getConnection():
     )
 
 def enviar_correo(proceso, detalle):
-    remitente = os.environ.get("EMAIL_REMITENTE")
-    password = os.environ.get("GMAIL_APP_PASSWORD")  # Gmail app password (16 chars)
+    # Sends through a Google Apps Script web app over HTTPS (Render free blocks SMTP)
+    script_url = os.environ.get("APPS_SCRIPT_URL")
+    token = os.environ.get("APPS_SCRIPT_TOKEN")
     destino = os.environ.get("EMAIL_DESTINO")
 
     faltantes = [
         nombre for nombre, valor in (
-            ("EMAIL_REMITENTE", remitente),
-            ("GMAIL_APP_PASSWORD", password),
+            ("APPS_SCRIPT_URL", script_url),
+            ("APPS_SCRIPT_TOKEN", token),
             ("EMAIL_DESTINO", destino),
         ) if not valor
     ]
     if faltantes:
         return f"Faltan variables de entorno: {', '.join(faltantes)}"
 
-    mensaje = MIMEText(detalle, "plain", "utf-8")
-    mensaje["Subject"] = f"Proceso: {proceso}"
-    mensaje["From"] = remitente
-    mensaje["To"] = destino
+    payload = json.dumps({
+        "token": token,
+        "to": destino,
+        "subject": f"Proceso: {proceso}",
+        "body": detalle,
+    }).encode("utf-8")
+    req = urlrequest.Request(
+        script_url, data=payload, headers={"Content-Type": "application/json"}
+    )
 
     # Returns None on success, or a readable error message
     try:
-        with SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
-            server.login(remitente, password)
-            server.sendmail(remitente, [destino], mensaje.as_string())
-        return None
-    except SMTPAuthenticationError as e:
-        app.logger.exception("Error de autenticacion con Gmail")
-        return f"Gmail rechazo el usuario o la contrasena de aplicacion: {e.smtp_code} {e.smtp_error.decode(errors='ignore')}"
-    except SMTPException as e:
-        app.logger.exception("Error SMTP al enviar correo")
-        return f"Error SMTP: {e}"
-    except OSError as e:  # after SMTPException: it subclasses OSError
-        app.logger.exception("No se pudo conectar a Gmail")
-        return f"No se pudo conectar a {SMTP_SERVER}:{SMTP_PORT} (el servidor puede estar bloqueando SMTP): {e}"
+        with urlrequest.urlopen(req, timeout=20) as resp:
+            texto = resp.read().decode("utf-8")
+    except OSError as e:  # URLError and read timeouts both subclass OSError
+        app.logger.exception("No se pudo conectar con Apps Script")
+        return f"No se pudo conectar con Apps Script: {e}"
+
+    try:
+        resultado = json.loads(texto)
+    except ValueError:
+        # Apps Script answers HTML when the deployment is not public or the URL is wrong
+        return "Apps Script no devolvio JSON: revisa que la URL termine en /exec y que el acceso sea 'Cualquier persona'"
+
+    if not resultado.get("ok"):
+        return f"Apps Script rechazo el envio: {resultado.get('error')}"
+    return None
 
 @app.route('/api/procesar', methods=['POST'])
 def procesar():
