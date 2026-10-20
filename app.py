@@ -1,7 +1,12 @@
 from flask import Flask, jsonify, request
+from email.mime.text import MIMEText
+from smtplib import SMTP_SSL
 import os
 import certifi
 import pytds
+
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 465
 
 #===============================
 # conexion con la base de datos
@@ -20,6 +25,55 @@ def getConnection():
         validate_host=True,
         row_strategy=pytds.namedtuple_row_strategy
     )
+
+def enviar_correo(proceso, detalle):
+    remitente = os.environ.get("EMAIL_REMITENTE")
+    password = os.environ.get("GMAIL_APP_PASSWORD")  # Gmail app password (16 chars)
+    destino = os.environ.get("EMAIL_DESTINO")
+
+    mensaje = MIMEText(detalle, "plain", "utf-8")
+    mensaje["Subject"] = f"Proceso: {proceso}"
+    mensaje["From"] = remitente
+    mensaje["To"] = destino
+
+    try:
+        with SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(remitente, password)
+            server.sendmail(remitente, [destino], mensaje.as_string())
+        return True
+    except Exception:
+        app.logger.exception("Error al enviar correo")
+        return False
+
+@app.route('/api/procesar', methods=['POST'])
+def procesar():
+    data = request.get_json(silent=True) or {}
+    proceso = data.get('proceso')
+
+    if not proceso:
+        return jsonify({"message": "Faltan datos requeridos"}), 400
+
+    try:
+        with getConnection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, names, price, stock
+                    FROM PRODUCTS_VW
+                """)
+                rows = cursor.fetchall()
+    except Exception:
+        app.logger.exception("Error al consultar productos")
+        return jsonify({"message": "Error interno al consultar productos"}), 500
+
+    detalle = "\n".join(
+        f"ID: {row[0]} | Nombre: {row[1]} | Precio: {row[2]} | Stock: {row[3]}"
+        for row in rows
+    ) or "No hay productos registrados"
+
+    if not enviar_correo(proceso, detalle):
+        return jsonify({"message": "Error al enviar correo"}), 500
+
+    return jsonify({"message": "Correo enviado con exito"}), 200
 
 @app.route('/test-db',methods=['GET'])
 def test_db():
