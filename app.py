@@ -41,50 +41,73 @@ def test_db():
         }), 500
         
         
-##vista de productos
+##vista de productos)
 @app.route("/api/products", methods=["GET"])
 def getProducts():
     try:
         conn = getConnection()
         cursor = conn.cursor()
-        cursor.execute("""select id, names, price, stock,version from products_vw""")
+
+        cursor.execute("""
+            SELECT id, names, price, stock, version
+            FROM products_vw
+        """)
+
         products = []
+
         for row in cursor.fetchall():
             products.append({
-                "id": row.id,  #se crea como una lista de diccionarios
-                "names": row.names,
-                "price": row.price,
-                "stock": row.stock,
-                "version":row.version
+                "id": row[0],
+                "names": row[1],
+                "price": row[2],
+                "stock": row[3],
+                "version": row[4]
             })
+
         cursor.close()
         conn.close()
-        return jsonify(products),200
+
+        return jsonify(products), 200
+
     except Exception as e:
         return jsonify({
             "mensaje": "Error al obtener los productos",
             "error": str(e)
         }), 500
-        
+
+ 
 @app.route("/api/products/<int:id>", methods=["GET"])
 def get_product(id):
     try:
-        conn=getConnection()
-        cursor=conn.cursor()
-        cursor.execute("""select id,names,price,stock,version from products_vw where id = ?""", id)
+        conn = getConnection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, names, price, stock, version
+            FROM products_vw
+            WHERE id = ?
+        """, (id,))
+
         row = cursor.fetchone()
+
         cursor.close()
         conn.close()
+
         if row:
             product = {
-                "id": row.id,
-                "names": row.names,
-                "price": row.price,
-                "stock": row.stock,
-                "version": row.version
+                "id": row[0],
+                "names": row[1],
+                "price": row[2],
+                "stock": row[3],
+                "version": row[4]
             }
+
             return jsonify(product), 200
-        return jsonify({"mensaje": "Producto no encontrado"}), 404
+
+        return jsonify({
+            "mensaje": "Producto no encontrado"
+        }), 404
+
     except Exception as e:
         return jsonify({
             "mensaje": "Error al obtener el producto",
@@ -234,9 +257,10 @@ def update_version():
             cursor.close()
             conn.close()
             if row:
-                producto_actual = {
-                    "id": data.get('id'),"version" : row.version}
-                
+               producto_actual = {
+                    "id": data.get("id"),
+                    "version": row[0]
+                    } 
             return jsonify({"msg":"Ya actualizaron este registro", "error": producto_actual}),404
             
         conn.commit()
