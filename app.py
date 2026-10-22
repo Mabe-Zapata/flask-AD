@@ -14,7 +14,6 @@ app = Flask(__name__)
 
 @app.after_request
 def add_cors_headers(response):
-    # Set CORS_ORIGIN to the WordPress domain in production; "*" allows any site
     response.headers["Access-Control-Allow-Origin"] = os.environ.get("CORS_ORIGIN", "*")
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
@@ -33,7 +32,6 @@ def getConnection():
     )
 
 def enviar_correo(proceso, detalle, detalle_html=None):
-    # Sends through a Google Apps Script web app over HTTPS (Render free blocks SMTP)
     script_url = os.environ.get("APPS_SCRIPT_URL")
     token = os.environ.get("APPS_SCRIPT_TOKEN")
     destino = os.environ.get("EMAIL_DESTINO")
@@ -59,18 +57,18 @@ def enviar_correo(proceso, detalle, detalle_html=None):
         script_url, data=payload, headers={"Content-Type": "application/json"}
     )
 
-    # Returns None on success, or a readable error message
+    
+    
     try:
         with urlrequest.urlopen(req, timeout=20) as resp:
             texto = resp.read().decode("utf-8")
-    except OSError as e:  # URLError and read timeouts both subclass OSError
+    except OSError as e:  
         app.logger.exception("No se pudo conectar con Apps Script")
         return f"No se pudo conectar con Apps Script: {e}"
 
     try:
         resultado = json.loads(texto)
     except ValueError:
-        # Apps Script answers HTML when the deployment is not public or the URL is wrong
         return "Apps Script no devolvio JSON: revisa que la URL termine en /exec y que el acceso sea 'Cualquier persona'"
 
     if not resultado.get("ok"):
@@ -100,30 +98,62 @@ def procesar():
     total = len(rows)
     resumen = f"Registros procesados: {total}"
 
-    # Plain text fallback for mail clients that do not render HTML
     detalle = resumen + "\n\n" + ("\n".join(
         f"ID: {row[0]} | Nombre: {row[1]} | Precio: {row[2]} | Stock: {row[3]}"
         for row in rows
     ) or "No hay productos registrados")
 
-    celda = 'style="border:1px solid #ddd;padding:8px"'
-    filas_html = "".join(
-        f"<tr><td {celda}>{row[0]}</td><td {celda}>{escape(str(row[1]))}</td>"
-        f'<td {celda} align="right">{row[2]}</td><td {celda} align="right">{row[3]}</td></tr>'
-        for row in rows
-    ) or f'<tr><td {celda} colspan="4">No hay productos registrados</td></tr>'
+    celda = 'padding:12px 14px;border-bottom:1px solid #e8e8ee'
+    encabezado = 'padding:12px 14px;font-size:12px;letter-spacing:1px;text-transform:uppercase'
+
+    def fila_html(i, row):
+        fondo = "#ffffff" if i % 2 == 0 else "#f6f7fb"
+        stock = row[3]
+        color_stock = "#c0392b" if stock is not None and stock <= 5 else "#1e8449"
+        return (
+            f'<tr style="background:{fondo}">'
+            f'<td style="{celda};color:#888">#{row[0]}</td>'
+            f'<td style="{celda};font-weight:bold">{escape(str(row[1]))}</td>'
+            f'<td style="{celda};color:#4f46e5;font-weight:bold" align="right">${row[2]}</td>'
+            f'<td style="{celda};color:{color_stock};font-weight:bold" align="right">{stock}</td>'
+            '</tr>'
+        )
+
+    filas_html = "".join(fila_html(i, row) for i, row in enumerate(rows)) or (
+        f'<tr><td style="{celda};text-align:center;color:#888" colspan="4">'
+        'No hay productos registrados</td></tr>'
+    )
     detalle_html = f"""
-        <div style="font-family:Arial,sans-serif;color:#222">
-            <h2 style="margin:0 0 8px">{escape(proceso)}</h2>
-            <p style="margin:0 0 16px"><strong>{resumen}</strong></p>
-            <table style="border-collapse:collapse;font-size:14px">
-                <thead>
-                    <tr style="background:#000;color:#fff">
-                        <th {celda}>ID</th><th {celda}>Nombre</th>
-                        <th {celda}>Precio</th><th {celda}>Stock</th>
-                    </tr>
-                </thead>
-                <tbody>{filas_html}</tbody>
+        <div style="background:#eef0f7;padding:32px 12px;font-family:Arial,sans-serif;color:#222">
+            <table align="center" width="600" cellpadding="0" cellspacing="0"
+                   style="margin:0 auto;width:100%;max-width:600px;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.08)">
+                <tr>
+                    <td align="center" style="background:#4f46e5;padding:32px 24px;color:#fff">
+                        <div style="font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:.8">Catalogo de productos</div>
+                        <h1 style="margin:8px 0 0;font-size:26px">{escape(proceso)}</h1>
+                        <div style="margin-top:12px;display:inline-block;background:rgba(255,255,255,.2);border-radius:20px;padding:6px 16px;font-size:13px">{resumen}</div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:24px">
+                        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;border:1px solid #e8e8ee">
+                            <thead>
+                                <tr style="background:#1f2937;color:#fff">
+                                    <th align="left" style="{encabezado}">ID</th>
+                                    <th align="left" style="{encabezado}">Producto</th>
+                                    <th align="right" style="{encabezado}">Precio</th>
+                                    <th align="right" style="{encabezado}">Stock</th>
+                                </tr>
+                            </thead>
+                            <tbody>{filas_html}</tbody>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td align="center" style="padding:16px;background:#f6f7fb;font-size:12px;color:#888">
+                        Stock en rojo: 5 unidades o menos
+                    </td>
+                </tr>
             </table>
         </div>
     """
